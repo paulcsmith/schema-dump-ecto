@@ -105,6 +105,86 @@ defmodule Mix.Ecto do
   end
 
   @doc """
+  Gets the schema path from the repository.
+  """
+  @spec schema_path(Ecto.Repo.t) :: String.t
+  def schema_path(repo) do
+    repo_priv(repo)
+  end
+
+  @doc """
+  Add me
+  """
+  @spec schema_filename(Ecto.Repo.t) :: String.t
+  def schema_filename(repo) do
+    database_info = repo.__adapter__.database_info
+    "#{inspect(repo)}-#{database_info.type}-#{database_info.version}.schema"
+  end
+
+  @doc """
+  Dumps the schema.
+  """
+  @spec schema_dump(Ecto.Repo.t) :: no_return
+  def schema_dump(repo) do
+    adapter = repo.__adapter__
+    dump = adapter.schema_dump(repo.config)
+  end
+
+  @doc """
+  Loads the schema. Will raise an exception if there is a database
+  type/version mismatch.
+  """
+  @spec schema_load(Ecto.Repo.t, String) :: no_return
+  def schema_load(repo, filename) do
+    adapter = repo.__adapter__
+
+    if database_matches?(repo, filename) do
+      adapter.schema_load(repo.config, filename)
+    else
+      raise "Schema Info Mismatch"
+    end
+  end
+
+  @doc """
+  Determines if the database defined in the Repo matches the
+  meta data defined in the schema
+  """
+  @spec database_matches?(Ecto.Repo.t, String) :: boolean
+  def database_matches?(repo, filename) do
+    adapter = repo.__adapter__
+    schema_info = extract_schema_info(adapter, filename)
+    database_info = adapter.database_info
+
+    database_match?(schema_info, database_info) && version_match?(repo, schema_info, database_info)
+  end
+  defp database_match?(schema_info, database_info) do
+    schema_info[:type] == database_info[:type]
+  end
+  defp version_match?(repo, schema_info, database_info) do
+    if constraint = repo.config[:schema_version_constraint] do
+      Version.match?(schema_info[:version], constraint) &&
+      Version.match?(database_info[:version], constraint)
+    else
+      true
+    end
+  end
+
+  @doc false
+  defp extract_schema_info(adapter, filename) do
+    filename
+    |> Path.basename()
+    |> Path.rootname()
+    |> String.split("-")
+    |> build_schema_info()
+  end
+  defp build_schema_info([repo, type, version]) do
+    %{repo: repo, type: type, version: version}
+  end
+  defp build_schema_info(_invalid) do
+    raise ArgumentError, "invalid schema file name..."
+  end
+
+  @doc """
   Returns the private repository path.
   """
   def repo_priv(repo) do

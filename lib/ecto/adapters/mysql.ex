@@ -135,21 +135,26 @@ defmodule Ecto.Adapters.MySQL do
   end
 
   defp run_with_mysql(database, sql_command) do
-    unless System.find_executable("mysql") do
-      raise "could not find executable `mysql` in path, " <>
+    args = ["--silent", "-e", sql_command]
+    run_with_cmd("mysql", database, args)
+  end
+
+  defp run_with_cmd(cmd, opts, opt_args) do
+    unless System.find_executable(cmd) do
+      raise "could not find executable `#{cmd}` in path, " <>
             "please guarantee it is available before running ecto commands"
     end
 
     env = []
 
-    if password = database[:password] do
+    if password = opts[:password] do
       env = [{"MYSQL_PWD", password}|env]
     end
 
-    host = database[:hostname] || System.get_env("MYSQL_HOST") || "localhost"
-    port = database[:port] || System.get_env("MYSQL_TCP_PORT") || "3306"
-    args = ["--silent", "-u", database[:username], "-h", host, "-P", to_string(port), "-e", sql_command]
-    System.cmd("mysql", args, env: env, stderr_to_stdout: true)
+    host = opts[:hostname] || System.get_env("MYSQL_HOST") || "localhost"
+    port = opts[:port] || System.get_env("MYSQL_TCP_PORT") || "3306"
+    args = ["-u", opts[:username], "-h", host, "-P", to_string(port)] ++ opt_args
+    System.cmd(cmd, args, env: env, stderr_to_stdout: true)
   end
 
   @doc false
@@ -179,5 +184,27 @@ defmodule Ecto.Adapters.MySQL do
 
   def insert(repo, model_meta, params, autogen, [], opts) do
     super(repo, model_meta, params, autogen, [], opts)
+  end
+
+  @doc false
+  def database_info do
+    { output, _ } = System.cmd("mysql", ["--version"])
+    [ _, version ] = Regex.run(~r/Distrib ([\w|.]+)/, output)
+    %{ type: "mysql", version: version }
+  end
+
+  @doc false
+  def schema_dump(config) do
+    { output, _ } = run_with_cmd("mysqldump", config, ["--no-data", "--routines", config[:database]])
+    output
+  end
+
+  @doc false
+  def schema_load(config, filename) do
+    args = [
+      "--execute", "SET FOREIGN_KEY_CHECKS = 0; SOURCE #{filename}; SET FOREIGN_KEY_CHECKS = 1",
+      "--database", config[:database]
+    ]
+    run_with_cmd("mysql", config, args)
   end
 end

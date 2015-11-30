@@ -102,13 +102,23 @@ defmodule Ecto.Adapters.Postgres do
   end
 
   defp run_with_psql(database, sql_command) do
-    unless System.find_executable("psql") do
-      raise "could not find executable `psql` in path, " <>
+    args = ["--quiet",
+            "--set", "ON_ERROR_STOP=1",
+            "--set", "VERBOSITY=verbose",
+            "--no-psqlrc",
+            "-d", "template1",
+            "-c", sql_command]
+    run_with_cmd("psql", database, args)
+  end
+
+  defp run_with_cmd(cmd, opts, opt_args) do
+    unless System.find_executable(cmd) do
+      raise "could not find executable `#{cmd}` in path, " <>
             "please guarantee it is available before running ecto commands"
     end
 
     env =
-      if password = database[:password] do
+      if password = opts[:password] do
         [{"PGPASSWORD", password}]
       else
         []
@@ -117,28 +127,42 @@ defmodule Ecto.Adapters.Postgres do
 
     args = []
 
-    if username = database[:username] do
+    if username = opts[:username] do
       args = ["-U", username|args]
     end
 
-    if port = database[:port] do
+    if port = opts[:port] do
       args = ["-p", to_string(port)|args]
     end
 
-    host = database[:hostname] || System.get_env("PGHOST") || "localhost"
-    args = args ++ ["--quiet",
-                    "--host", host,
-                    "--set", "ON_ERROR_STOP=1",
-                    "--set", "VERBOSITY=verbose",
-                    "--no-psqlrc",
-                    "-d", "template1",
-                    "-c", sql_command]
-    System.cmd("psql", args, env: env, stderr_to_stdout: true)
+    host = opts[:hostname] || System.get_env("PGHOST") || "localhost"
+    args = ["--host", host|args]
+
+    args = args ++ opt_args
+    System.cmd(cmd, args, env: env, stderr_to_stdout: true)
   end
 
   @doc false
 
   def supports_ddl_transaction? do
     true
+  end
+
+  @doc false
+  def database_info do
+    { output, _ } = System.cmd("psql", ["--version"])
+    [ _, _, version ] = Regex.run(~r/^(\w+) \(\w+\) (.+)$/, output)
+    %{ type: "psql", version: version }
+  end
+
+  @doc false
+  def schema_dump(config) do
+    { output, _ } = run_with_cmd("pg_dump", config, ["-s", "-x", "-i", "-O", config[:database]])
+    output
+  end
+
+  @doc false
+  def schema_load(config, filename) do
+    run_with_cmd("psql", config, ["-q", "-f", filename, config[:database]])
   end
 end
